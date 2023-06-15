@@ -1,0 +1,76 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: MNETCRErrorChecker
+//  Author : Larry Frieson
+//  Desc   : Small Routine that checks the error status of an MNETCR module, and sets the MNETCRErrors[30] tag accordingly.
+//  Date   : 10/25/2022
+//  Tags   : MonitorMNETCR      - Bool: A flag indicating if we should perform error checking on the MNETCR or not.  (Controller or Program Scope)
+//           MNETCRErrors[30]   - INT: Contains the logical OR value of all command errors. (Controller Scope)
+//           TotalMNETCRClients - INT: Contains the total # of clients to process.  (Local Program Scope)
+//           CurrentClient      - INT: Current MNETCR Client to process. (Local Program Scope)
+//           CurrCommand        - INT: The index of the command being checked. (Local Program Scope)
+//           CRCmdErrPtr[30]    - INT: The element in the ReadDaa array where the error info for the given client is stored. (Local Program Scope)
+//           CRCmdErrPtrLen[30] - INT: The length of the CommandErrPtr.  (How many command index's do we need to check. (Local Program Scope)
+//           WriteCmdBitsOn     - Bool: A boolean that indicates if the command is even enabled or not. (Local Program Scope)
+//           FlexIO - (UDT: FlexOutput): UDT of booleans to control a FlexIO 1794-OB8 module.
+//
+//  Copyright © 2022 ProSoft Technology, Inc.  All rights reserved.
+//
+//  Revision History: 
+//    10/25/2022 20:36:05 created.
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Exit routine if we don't want to monitor the errors.
+IF NOT MonitorMNETCR THEN
+    RET(0);
+END_IF;
+
+// Process each client one by one, checking for errors.
+FOR CurrentCRClient := 0 TO TotalMNETCRClients -1 DO
+    MNETCRErrors[CurrentCRClient] := 0;
+    // Perform a pre-check, to make sure we don't run over the ReadData array...
+    // Prevent a fault in the controller if the CommandIndex + CommandErrLen is greater than ReadData array.
+    IF CRCmdErrPtr[CurrentCRClient] + CRCmdErrPtr[CurrentCRClient] > MNETCR.UTIL.ReadDataSizeGet THEN
+        MNETCRErrors[CurrentCRClient] := 9999; // Prevent Controller fault by not even processing this client!
+        RET(-1);
+    END_IF;
+
+    // Go through the ReadData array checking for errors, starting at the CmdErrPtr[CurrentClient] index, for CmdErrPtrLen[CurrentClient] indices.
+    FOR CurrentCommand := CRCmdErrPtr[CurrentCRClient] TO (CRCmdErrPtr[CurrentCRClient] + CRCmdErrPtr[CurrentCRClient]) - 1 DO
+        WriteCmdBitsOn := 0;
+        CASE (CurrentCommand) OF
+            0: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].0;
+            1: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].1;
+            2: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].2;
+            3: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].3;
+            4: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].4;
+            5: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].5;
+            6: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].6;
+            7: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].7;
+            8: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].8;
+            9: WriteCmdBitsOn  := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].9;
+            10: WriteCmdBitsOn := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].10;
+            11: WriteCmdBitsOn := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].11;
+            12: WriteCmdBitsOn := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].12;
+            13: WriteCmdBitsOn := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].13;
+            14: WriteCmdBitsOn := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].14;
+            15: WriteCmdBitsOn := MNETCR.CONTROL.WriteCmdBits[CurrentCRClient].15;
+        END_CASE;
+        IF WriteCmdBitsOn THEN
+            // Perform a logical OR on all of the command errors.  If there are none, we'll end up with 0 at the end.  If there
+            // are any errors whatsoever, we'll end up with SOME sort of value other than zero.
+            MNETCRErrors[CurrentCRClient] := (MNETCRErrors[CurrentCRClient] OR MNETCR.DATA.ReadData[CurrentCRCommand]);
+        END_IF;
+    END_FOR;
+END_FOR;
+
+// Do what you need to do to process your errors.
+// Set Stack light indicating which client is in error.
+FOR CurrentClient := 0 TO TotalMNETCRClients -1 DO
+    IF MNETCRErrors[CurrentClient] <> 0 THEN
+        // Set the proper LED Error indicators for our 1794-OB8.  NO errors reported, so toggle the
+        // LED to Green, and turn off the red LED.
+        FlexIO.ModbusErrorIndicator := 0;
+    ELSE
+        // Set the proper LED Error indicators for our 1794-OB8.  In this case, we have errors to report.
+        FlexIO.ModbusErrorIndicator := 1;
+    END_IF;
+END_FOR;

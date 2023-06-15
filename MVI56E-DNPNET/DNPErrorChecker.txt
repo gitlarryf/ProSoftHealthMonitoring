@@ -1,0 +1,128 @@
+﻿////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: DNPErrorChecker
+//  Author : Larry Frieson
+//  Desc   : Small routine that checks the status of all your DNPNET Client Commands, (that are enabled in the Port_flags)
+//           and sets the lights on a Stack Light accordingly.
+//  Date   : 11/19/2016
+//  Tags   : NumCommands - INT, Program Scope: Contains the total number of commands defined, unless 0.  If 0, the routine
+//                                             will calculate the number of commands you have defined via the UDT.  A value
+//                                             -1 will effectively disable the error checking altogether, without setting
+//                                             any status indicators.
+//           EnableErrorDetection - BOOL: A simple Boolean that will enable/disable the entire error checking process.  Use
+//                                        this during maintenance, or shutdown, or testing, where you don't want (known) errors
+//                                        to cause unwanted alarms, or SCADA results, possibly resulting in operators reacting
+//                                        in ways that could be bad.
+//           DNPErrors - INT, Program Scope: Contains the logical OR value of all command errors.  If this value is 0, then
+//                                           there are no command errors.  If it is anything other than 0; you have one or more
+//                                           command errors.
+//           CurrentCommand - INT, Program Scope: The index of the command being checked.
+//           DNPStatusCount - DINT, Program Scope: The number of times we've seen the "300 status block".
+//           DNPErrorReadThreshold - DINT, Program Scope: This is a CONSTANT value that decides how often we're going to ask
+//                                                        for the command error statuses.  This value should be between
+//                                                        11 and 503, but could be much larger, if you so desire.  The amount
+//                                                        of time in WCT is dependent on your RPI and other factors, so values
+//                                                        cannot be provided to give you exact results.  You would need to trend
+//                                                        DNPStatusCount to see how often it is being reset to 0, to get a WCT.
+//                                                        Prime values would probably work best here, if you're using other DNPNET
+//                                                        special blocks.  Contact Tech Support for more information.
+//           FlexIO - UDT:FlexOutput, Controller Scope: UDT of Booleans to control a FlexIO 1794-OB8 module. (Example only!)
+//
+//  Copyright © 2016 ProSoft Technology, Inc.  All rights reserved.
+//
+//  Revision History:
+//    11/18/2016 18:09:05 created.
+//    01/20/2023 15:14:35 Added DNPStatusCount field to prevent overburden on the module.
+//    05/04/2023 15:17:02 Cleaned up code comments, and added NumCommands range checking, and cleaned up unnecessary code.
+//    06/15/2023 12:44:14 Added more comments, and missing tag decl above. 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Set the command start index to 0. NOTE: You can arrange this so that parameters are passed in to dictate the command # to
+// start at.  Honestly, most people don't have more than 200 commands, which is the max we get back in a single 9950 block.
+DNPNET.CONTROL.Command_Errors.Start_index := 0;
+
+// You can set the NumCommands value to -1 to stop error checking entirely.  For example, when you shutdown for maintenance.
+// If you set it to more than 200, we could potentially fault the processor, so we'll just bail out in that case.
+IF NumCommands = -1 OR NumCommands > 200 THEN
+    RET();
+END_IF;
+// Otherwise, if you don't provide a value, we'll just figure it out for ourselves...
+IF NumCommands = 0 THEN
+    // We didn't set the NumCommands tag, so we'll just calculate it ourselves, based on the UDT size.
+    SIZE(DNPNET.CONFIG.DNP_Client_Commands, 0, NumCommands);
+END_IF;
+
+// We've requested command errors, but the module hasn't send us the 9950 block yet; or we've been instructed to not even
+// check for errors, so we'll just bail out of this routine, and wait for the module to process the request.
+IF DNPNET.CONTROL.Command_Errors.Request OR NOT EnableErrorDetection THEN
+    RET();
+END_IF;
+
+IF DNPNET.UTIL.LastRead = 300 AND DNPStatusCount >= DNPErrorReadThreshold THEN
+    // It's time to check for errors, so we'll request them via the AOI and exit.  There's noting else of us to do until
+    // we get the results of the 9950 block.
+    /*** NOTE: If you're extra paranoid, you can actually clear the DNPNET.STATUS.CommandErrors array here; or set them all
+     ***       some known value so that you can be 1000000% certain that the DNPNET processed the 9950 block, before you go
+     ***       iterating it, checking for errors.  I've left that to be an exercise for the reader/SI who would be implementing
+     ***       this routine.  I'd also like to stipulate that it is /not/ necessary, but I understand the reasoning behind it. */
+    DNPNET.CONTROL.Command_Errors.Number_Of_Commands := NumCommands;
+    DNPNET.CONTROL.Command_Errors.Request := 1;
+    DNPStatusCount := 0;
+    RET();
+ELSIF DNPNET.UTIL.LastRead = 300 AND EnableErrorDetection THEN
+    // TODO: Write a routine that calculates the # of DNP_Server_List servers the user is processing, and create an array out of DNPErrors
+    //       so that we can report which individual SERVERS are having trouble; not just one single flag to indicate trouble on ANY server.
+    //       This could and would increase this routines SCAN time, but this routine should be scanning in nanoseconds as it is.
+    //       Coming soon in 2023...time permitting!
+    DNPStatusCount := DNPStatusCount + 1;
+    // Reset our error flag
+    DNPErrors := 0;
+    CheckedCommands := 0;
+    FOR CurrentCommand := 0 TO NumCommands-1 DO
+        // If the command isn't enabled, don't check it!  This is important!
+        IF DNPNET.CONFIG.DNP_Client_Commands[CurrentCommand].Port_Flags.2 THEN
+            // Perform a logical OR on all of the command errors.  If there are none, we'll end up with 0 at the end.  If there
+            // are any errors whatsoever, we'll end up with some sort of value other than zero.
+            // This is just one of many ways you can process/handle your errors.  You can check for specific errors like 1006, etc.
+            // You can can create a CASE statement here, based on the errors you got, and trigger various alerts based on those results.
+            // You can even check for the Slave ID to change, and then reset the DNPErrors tag, so that you can identify which slaves are
+            // actually in error, and which ones aren't.
+            DNPErrors := (DNPErrors OR DNPNET.STATUS.CommandErrors[CurrentCommand]);
+            CheckedCommands := CheckedCommands + 1;
+        END_IF;
+    END_FOR;
+END_IF;
+
+// Check to see if we've got an error, or if we even checked any commands at all.  This could be useful in the event that you are taking your
+// IED's offline and don't want to be bothered with errors at this time; or worse, having alerts show up on SCADA/DCS causing
+// unnecessary panic in the control room.  This can be further extended to support each slave, so using a DINT, we can enable
+// or disable error checking on up to 31 slaves.  The code below shows a 1794-OB8 modules connected to a stack light.  I have it setup so
+// that FlexIO.DNPNETErrorIndicator is tied to the RED light, FlexIO.DNPNETNoErrorIndicator is wired to the GREEN light, and
+// FlexIO.DisabledErrorChecking is wired to the YELLOW light.
+IF DNPErrors = 0 AND CheckedCommands <> 0 THEN
+    // We checked some commands, and we have no errors, so things are good.  We'll set the proper LED Error indicators
+    // on our 1794-OB8.  Since no errors are reported, we toggle the LED to green, and turn off the red LED.
+    FlexIO.DNPNETErrorIndicator := 0;
+    FlexIO.DNPNETNoErrorIndicator := 1;
+ELSIF DNPErrors <> 0 AND CheckedCommands <> 0 THEN
+    // We checked more than one command, and we have an error.  So, we'll set the LED's indicating we are in an error state.
+    FlexIO.DNPNETErrorIndicator := 1;
+    FlexIO.DNPNETNoErrorIndicator := 0;
+ELSIF CheckedCommands = 0 THEN
+    // We didn't even check any commands.  Perhaps they're all disabled via the Port_flags?
+    // So, we won't light any of the lights, in this case--including the DisabledErrorChecking since it is not explicitly
+    // disabled.  If it is, the final IF statement below will handle it.
+    FlexIO.DNPNETErrorIndicator := 0;
+    FlexIO.DNPNETNoErrorIndicator := 0;
+END_IF;
+
+FlexIO.DisabledErrorChecking := 0;
+IF NOT EnableErrorDetection THEN
+    // Only if we're not checking for errors, will we light the DiableErrorChecking status light.  We'll also disable the other two lights
+    // since we honestly don't know their state at this time.
+    FlexIO.DNPNETErrorIndicator := 0;
+    FlexIO.DNPNETNoErrorIndicator := 0;
+    FlexIO.DisabledErrorChecking := 1;
+END_IF;
+
+// Finally, copy the FlexIO UDT that we built to the output image of our FlexIO OB8 output module, thus setting the stack light to
+// the desired lighting.
+COP(FlexIO, FlexIO:1:O.Data, 1);

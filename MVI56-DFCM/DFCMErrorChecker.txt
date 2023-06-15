@@ -1,0 +1,54 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: DFCMErrorChecker
+//  Author : Larry Frieson
+//  Desc   : Small Routine that checks the error status of the DFCM module, and sets the DFCMErrors tag accordingly.
+//  Date   : 06/04/2018
+//  Tags   : DFCMError - INT: Contains the logical OR value of all command errors.
+//           CurrCommand - INT: The index of the command being checked.
+//           FlexIO - (UDT: FlexOutput): UDT of booleans to control a FlexIO 1794-OB8 module, over ControlNet.
+//
+//  Copyright © 2018 ProSoft Technology, Inc.  All rights reserved.
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Reset our error flag
+DFCMError := 0;
+
+// Check if Port 1 is enabled, and is a Master.  Otherwise move on to port 2.
+IF DFCM.CONFIG.Port1.Enabled = 1 AND DFCM.CONFIG.Port1.Type = 0 THEN
+    // Go through the Port1.CmdCount list of commands and check for errors.
+    FOR CurrentCommand := 0 TO DFCM.CONFIG.Port1.CmdCount-1 DO
+        // If the command isn't enabled, don't bother to check it.
+        IF DFCM.CONFIG.Port1MasterCmd[CurrentCommand].Enable = 1 THEN
+            // Perform a logical OR on all of the command errors.  If there are none, we'll end up with 0 at the end.  If there
+            // are any errors whatsoever, we'll end up with some sort of value other than zero.
+            DFCMError := (DFCMError OR DFCM.DATA.ReadData[(DFCM.CONFIG.Port1.CmdErrPtr - DFCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand]);
+        END_IF;
+    END_FOR;
+END_IF;
+
+// If Port2 is enabled, AND is a Master, AND we haven't have any errors yet, then check port 2 as well.
+IF DFCM.CONFIG.Port2.Enabled = 1 AND DFCM.CONFIG.Port2.Type = 0 AND DFCMError = 0 THEN
+    FOR CurrentCommand := 0 TO DFCM.CONFIG.Port2.CmdCount-1 DO
+        // If the command isn't enabled, don't bother to check it.
+        IF DFCM.CONFIG.Port2MasterCmd[CurrentCommand].Enable = 1 THEN
+            // Perform a logical OR on all of the command errors.  If there are none, we'll end up with 0 at the end.  If there
+            // are any errors whatsoever, we'll end up with some sort of value other than zero.
+            DFCMError := (DFCMError OR DFCM.DATA.ReadData[(DFCM.CONFIG.Port2.CmdErrPtr - DFCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand]);
+        END_IF;
+    END_FOR;
+END_IF;
+
+// Report our findings, then copy the FlexIO tag over to Remote:1
+IF DFCMError = 0 THEN
+    // No Errors on the current commands.  So, we need to set the proper LED Error indicators for our 1794-OB8.
+    // Since NO errors have been reported, we toggle the LED to Green, and turn off the Red LED.
+    FlexIO.DFCMErrorIndicator := 0;
+    FlexIO.DFCMNoErrorIndicator := 1;
+ELSE
+    // Set the proper (Red) LED error indicators for our 1794-OB8.  In this case, we have errors to report.
+    FlexIO.DFCMErrorIndicator := 1;
+    FlexIO.DFCMNoErrorIndicator := 0;
+END_IF;
+
+// Copy the FlexIO UDT to the output image of our FlexIO Output module, causing the proper LED's to either
+// illuminate, or not.
+//COP(FlexIO, FlexIO:1:O.Data, 1);

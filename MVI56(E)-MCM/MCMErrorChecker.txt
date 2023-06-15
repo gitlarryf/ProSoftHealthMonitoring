@@ -1,0 +1,97 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: MCMErrorChecker
+//  Author : Larry Frieson
+//  Desc   : Small Routine that checks the error status of an MCM module, and sets the ModbusErrors tag accordingly.
+//  Date   : 06/29/2017
+//  Tags   : ModbusPort1Error - INT (Controller Scope): Contains the logical OR value of all command errors on port 1.
+//           ModbusPort2Error - INT (Controller Scope): Contains the logical OR value of all command errors on port 2.
+//           CurrentCommand - INT (Program Scope): The index of the command being checked.
+//           FlexIO - (UDT: FlexOutput Controller Scope): UDT of booleans to control a FlexIO 1794-OB8 module.
+//           Errors - INT (Controller Scope) : If not 0, we are in error status on one port or the other.
+//           EnableModbusErrorChecking - BOOL (Controller Scope): If 0, then ignore errors from this module.
+//
+//  Copyright © 2017 ProSoft Technology, Inc.  All rights reserved.
+//
+//  Revision History: 
+//    06/29/2017 18:09:05 created.
+//    03/12/2019 16:37:01 Added Port 2 Error checker
+//    08/26/2019 17:24:41 Changed the way the ModbusPort#Error tag was cleared, to be more readable.
+//
+// ToDo: Create an array of maybe 32 devices, or maybe an array of 254 booleans, each one indicating a slave on the
+//       on the port.  If an error is detected on a command for example where the PortXMasterCmd.Node is 2, then the 
+//       second bit would be a "1".  This would allow your code to indicate not only that there is an error, but which
+//       slave is in error.
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// If the ports aren't MNASTER ports, then just exit the routine.
+IF MCM.CONFIG.Port1.Type <> 0 AND MCM.CONFIG.Port2.Type <> 0 THEN
+    ModbusPort1Error := 0; // Force "No Error", since we aren't a Master (Client)
+    ModbusPort2Error := 0; // Force "No Error", since we aren't a Master (Client)
+    RET();
+END_IF;
+
+// Check port 1 for errors; if it is a MASTER (Client) port, and it has a CmdErrPtr set.
+// ToDo: Validate that CmdErrPtr + CmdCount does not walk off the end of the ReadData array.
+IF MCM.CONFIG.Port1.Type = 0 AND MCM.CONFIG.Port1.CmdErrPtr >= 0 THEN
+    // Reset our error flag, and check for errors.
+    ModbusPort1Error := 0;
+    FOR CurrentCommand := 0 TO MCM.CONFIG.Port1.CmdCount-1 DO
+        // If the command isn't enabled, don't bother to check it.
+        IF MCM.CONFIG.Port1MasterCmd[CurrentCommand].Enable = 1 THEN
+            // Perform a logical OR on all of the command error pointer values.  If there are none, we'll end up with 0 at the end.  If there
+            // are any errors whatsoever, we'll end up with some sort of value other than zero.  At this point, we don't care what the error actually is;
+            // just that an error did occur.
+            ModbusPort1Error := (ModbusPort1Error OR MCM.DATA.ReadData[(MCM.CONFIG.Port1.CmdErrPtr - MCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand]);
+        END_IF;
+    END_FOR;
+ELSE
+    // If we aren't a master port, force our error value to zero.
+    ModbusPort1Error := 0;
+END_IF;
+
+// Check port 2 for errors; if it is a MASTER (Client) port.
+// ToDo: Validate that CmdErrPtr + CmdCount does not walk off the end of the ReadData array.
+IF MCM.CONFIG.Port2.Type = 0 AND MCM.CONFIG.Port2.CmdErrPtr >= 0 THEN
+    // Reset our error flag, and check for errors.
+    ModbusPort2Error := 0;
+    FOR CurrentCommand := 0 TO MCM.CONFIG.Port2.CmdCount-1 DO
+        // If the command isn't enabled, don't check it.
+        IF MCM.CONFIG.Port2MasterCmd[CurrentCommand].Enable = 1 THEN
+            // Perform a logical OR on all of the command errors pointer values.  If there are none, we'll end up with 0 at the end.  If there
+            // are any errors whatsoever, we'll end up with some sort of value other than zero.  At this point, we don't care what the error actually is;
+            // just that an error did occur.
+            ModbusPort2Error := (ModbusPort2Error OR MCM.DATA.ReadData[(MCM.CONFIG.Port2.CmdErrPtr - MCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand]);
+        END_IF;
+    END_FOR;
+ELSE
+    // If we aren't a master port, force our error value to zero.
+    ModbusPort2Error := 0;
+END_IF;
+
+// Errors is an indicator that AN error occurred.  You can get much more complex here by testing the two ports individually, if you see fit.
+// You also have ModbusPort1Error and ModbusPort2Error values to test for errors on each port.  Errors tag simply reports than an error on one
+// port or another occurred.
+Errors := (ModbusPort1Error OR ModbusPort2Error);
+
+// Below is an example 1794-OB8 module attached to my rack.  I've created a UDT called "FlexIO" that contains 8 Boolean tags that reference different
+// LED's (A stack light hooked up to the OB8, from 0-8) that indicate which module of mine is in error.
+// Set the LED indicators based on the error conditions.
+IF EnableModbusErrorChecking THEN
+    FlexIO.DisabledErrorChecking := 0;
+    IF Errors = 0 THEN
+        // Set the proper LED Error indicators for our 1794-OB8.  NO errors reported, so toggle the
+        // Red LED off.
+        FlexIO.ModbusErrorIndicator := 0;
+    ELSE
+        // Set the proper LED Error indicators for our 1794-OB8.  We have errors to report, so toggle the
+        // Red LED on.
+        FlexIO.ModbusErrorIndicator := 1;
+    END_IF;
+ELSE
+    // The user turned off error checking, so turn off the RED led, and light the YELLOW light.
+    FlexIO.ModbusErrorIndicator := 0;
+    FlexIO.DisabledErrorChecking := 1;
+    // We could even clear the error indicators if we feel the need.
+    //Errors := 0;
+    //ModbusPort1Error := 0;
+    //ModbusPort2Error := 0;
+END_IF;

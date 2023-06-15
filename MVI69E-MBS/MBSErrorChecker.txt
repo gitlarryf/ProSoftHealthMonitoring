@@ -1,0 +1,39 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: ModbusErrorChecker for MVI69E-MBS
+//  Author : Larry Frieson
+//  Desc   : Checks for Command Errors on port 1, and raises a flag if an error occurs.
+//  Date   : 12/16/2021
+//  Tags   : EnableErrorChecking - BOOL (Program Scope): If TRUE, this routine runs, otherwise it exits.
+//           CurrentCommand - INT (Program Scope): The current command# we're processing.
+//           CommandErrorOffset - INT (Program Scope: The offset into the ReadData Array where the CommandErrPtr points. 
+//                                                    NOTE!  This is ARRAY based, and not Module RAM based!
+//           ModbusError - INT (Program Scope): The total error value of the Modbus Error we got for the port we're 
+//                                              processing.
+//           PortNum - INT (Program Scope): The Port Number we're checking errors for.
+//
+//  Copyright © 2021   All rights reserved.
+//
+//  Revision History: 
+//    12/16/2021 10:00:23 created.
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ToDO: Pull module device info from I/O tree, and call the right code based on the MVI69E module in use.
+IF NOT EnableErrorChecking THEN
+    RET();
+END_IF;
+
+// First, reset the error status.
+ModbusError := 0;
+FOR CurrentCommand := CommandErrorOffset TO CommandErrorOffset + CommandCount DO
+    // Perform Logical OR on the current command error with the cumulative value to produce us an error state.
+    ModbusError := (ModbusError OR MBS.DATA.ReadData[CurrentCommand]);
+END_FOR;
+// If ModbusError is equal to 0, then we have no errors.  Any other value, and we have a command that threw an error.
+
+// ToDo: This is a more complicated routine, but can be done.  If a command goes into an error state, we can clear the
+//        the data in the ReadData array.  This just requires a little more information on the configuration, since we 
+//        don't know which addresses are associated with each command--the user would have to provide a table.
+// If we got an error, then we need to send the Clear Memory Message.
+//IF ModbusError <> 0 THEN
+//    ResetMBSMemory := 1;
+//    //ResetMBTCPMemory := 1;
+//END_IF;
