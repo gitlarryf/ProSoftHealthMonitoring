@@ -1,0 +1,31 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: MBTCP_ErrorChecker
+//  Author : Larry Frieson
+//  Desc   : Small Routine that checks the error status of a PLX3x-EIP-MBTCP gateway module, and sets the ClientError[x]
+//           tag accordingly.
+//  Date   : 07/17/2023
+//  Tags   : ClientError - BOOL[9] (Controller Scope): Contains the boolean value of the state of that client.
+//           CurrentCommand - INT (Program Scope): Contains the index value of the current command being checked.
+//           ErrorVal - INT (Program Scope): Contains the logical OR value of all command errors on each client.
+//           EnableMBTCPErrorChecking - BOOL (Controller Scope): If 0, then ignore errors from this module.
+//
+//  Copyright © 2023 ProSoft Technology, Inc.  All rights reserved.
+//
+//  Revision History: 
+//    07/17/2023 11:25:12 created.
+//
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+IF NOT EnableMBTCPErrorChecking THEN
+    RET();
+END_IF;
+
+ErrorVal := 0;
+FOR CurrentCommand := 0 TO 15 DO
+    // ToDo: Pass in the MBTCP:I1 as a parameter, so that this can be called in a loop from MainRoutine.
+    ErrorVal := ErrorVal OR MBTCP:I1.Data[232 + CurrentCommand];
+END_FOR;
+
+IF ErrorVal <> 0 THEN
+    ClientError[CurrentClient] := 1;
+    // We're in an error state...
+END_IF;
