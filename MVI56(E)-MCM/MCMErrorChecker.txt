@@ -6,7 +6,8 @@
 //  Tags   : ModbusPort1Error - INT (Controller Scope): Contains the logical OR value of all command errors on port 1.
 //           ModbusPort2Error - INT (Controller Scope): Contains the logical OR value of all command errors on port 2.
 //           CurrentCommand - INT (Program Scope): The index of the command being checked.
-//           FlexIO - (UDT: FlexOutput Controller Scope): UDT of booleans to control a FlexIO 1794-OB8 module.
+//           ReadSize - DINT (Program Scope): The size of the ReadData array defined in the UDT.
+//           FlexIO - (UDT: FlexOutput Controller Scope): UDT of Booleans to control a FlexIO 1794-OB8 module.
 //           Errors - INT (Controller Scope) : If not 0, we are in error status on one port or the other.
 //           EnableModbusErrorChecking - BOOL (Controller Scope): If 0, then ignore errors from this module.
 //
@@ -16,12 +17,20 @@
 //    06/29/2017 18:09:05 created.
 //    03/12/2019 16:37:01 Added Port 2 Error checker
 //    08/26/2019 17:24:41 Changed the way the ModbusPort#Error tag was cleared, to be more readable.
+//    05/08/2025 11:19:45 Added safety check to CmdErrPtr + CmdCount to ensure we don't fault the processor.
+//                        Added additional config checks that will abort the routine and force specific errors.
+//                        Added check to exit routine if user has error checking disabled altogether.
 //
-// ToDo: Create an array of maybe 32 devices, or maybe an array of 254 booleans, each one indicating a slave on the
-//       on the port.  If an error is detected on a command for example where the PortXMasterCmd.Node is 2, then the 
+// ToDo: Create an array of maybe 32 devices, or maybe an array of 247 Booleans, each one indicating a slave on the
+//       on the port.  If an error is detected on a command for example where the PortXMasterCmd.Node is 2, then the
 //       second bit would be a "1".  This would allow your code to indicate not only that there is an error, but which
 //       slave is in error.
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// If Error Checking is disabled, don't even run the routine.
+IF NOT EnableModbusErrorChecking THEN
+    RET();
+END_IF;
+
 // If the ports aren't MNASTER ports, then just exit the routine.
 IF MCM.CONFIG.Port1.Type <> 0 AND MCM.CONFIG.Port2.Type <> 0 THEN
     ModbusPort1Error := 0; // Force "No Error", since we aren't a Master (Client)
@@ -29,18 +38,39 @@ IF MCM.CONFIG.Port1.Type <> 0 AND MCM.CONFIG.Port2.Type <> 0 THEN
     RET();
 END_IF;
 
+// Check to make sure that the CmdErrPtr actually lives within the ReadData[].
+IF MCM.CONFIG.Port1.CmdErrPtr < MCM.CONFIG.ModDef.ReadStartReg OR MCM.CONFIG.Port1.CmdErrPtr > MCM.CONFIG.ModDef.ReadStartReg + MCM.CONFIG.ModDef.ReadRegCnt THEN
+    ModbusPort1Error := -9999 // Force an indication that something is wrong in the config.
+    //RET();
+END_IF;
+IF MCM.CONFIG.Port2.CmdErrPtr < MCM.CONFIG.ModDef.ReadStartReg OR MCM.CONFIG.Port2.CmdErrPtr > MCM.CONFIG.ModDef.ReadStartReg + MCM.CONFIG.ModDef.ReadRegCnt THEN
+    ModbusPort2Error := -9999 // Force an indication that something is wrong in the config.
+    //RET();
+END_IF;
+// Check that we don't have duplicate CmdErrPtr values that will result in incorrect error reporting.
+IF MCM.CONFIG.Port1.CmdErrPtr = MCM.CONFIG.Port2.CmdErrPtr THEN
+    ModbusPort1Error := -9991 // Force an indication that something is wrong in the config.
+    ModbusPort2Error := -9991 // Force an indication that something is wrong in the config.
+    RET();
+END_IF;
+
+// Pull the size of the ReadData so we don't walk off the end.
+SIZE(MCM.DATA.ReadData, 0, ReadSize);
+
 // Check port 1 for errors; if it is a MASTER (Client) port, and it has a CmdErrPtr set.
-// ToDo: Validate that CmdErrPtr + CmdCount does not walk off the end of the ReadData array.
 IF MCM.CONFIG.Port1.Type = 0 AND MCM.CONFIG.Port1.CmdErrPtr >= 0 THEN
     // Reset our error flag, and check for errors.
     ModbusPort1Error := 0;
     FOR CurrentCommand := 0 TO MCM.CONFIG.Port1.CmdCount-1 DO
         // If the command isn't enabled, don't bother to check it.
         IF MCM.CONFIG.Port1MasterCmd[CurrentCommand].Enable = 1 THEN
-            // Perform a logical OR on all of the command error pointer values.  If there are none, we'll end up with 0 at the end.  If there
-            // are any errors whatsoever, we'll end up with some sort of value other than zero.  At this point, we don't care what the error actually is;
-            // just that an error did occur.
-            ModbusPort1Error := (ModbusPort1Error OR MCM.DATA.ReadData[(MCM.CONFIG.Port1.CmdErrPtr - MCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand]);
+            // Check to make sure that our CmdErrPtr doesn't walk us off the end of MCM.DATA.ReadData, which would fault the processor.
+            IF ReadSize > ((MCM.CONFIG.Port1.CmdErrPtr - MCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand) THEN
+                // Perform a logical OR on all of the command error pointer values.  If there are none, we'll end up with 0 at the end.  If there
+                // are any errors whatsoever, we'll end up with some sort of value other than zero.  At this point, we don't care what the error actually is;
+                // just that an error did occur.
+                ModbusPort1Error := (ModbusPort1Error OR MCM.DATA.ReadData[(MCM.CONFIG.Port1.CmdErrPtr - MCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand]);
+            END_IF;
         END_IF;
     END_FOR;
 ELSE
@@ -56,10 +86,13 @@ IF MCM.CONFIG.Port2.Type = 0 AND MCM.CONFIG.Port2.CmdErrPtr >= 0 THEN
     FOR CurrentCommand := 0 TO MCM.CONFIG.Port2.CmdCount-1 DO
         // If the command isn't enabled, don't check it.
         IF MCM.CONFIG.Port2MasterCmd[CurrentCommand].Enable = 1 THEN
-            // Perform a logical OR on all of the command errors pointer values.  If there are none, we'll end up with 0 at the end.  If there
-            // are any errors whatsoever, we'll end up with some sort of value other than zero.  At this point, we don't care what the error actually is;
-            // just that an error did occur.
-            ModbusPort2Error := (ModbusPort2Error OR MCM.DATA.ReadData[(MCM.CONFIG.Port2.CmdErrPtr - MCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand]);
+            // Check to make sure that our CmdErrPtr doesn't walk us off the end of MCM.DATA.ReadData, which would fault the processor.
+            IF ReadSize > ((MCM.CONFIG.Port2.CmdErrPtr - MCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand) THEN
+                // Perform a logical OR on all of the command errors pointer values.  If there are none, we'll end up with 0 at the end.  If there
+                // are any errors whatsoever, we'll end up with some sort of value other than zero.  At this point, we don't care what the error actually is;
+                // just that an error did occur.
+                ModbusPort2Error := (ModbusPort2Error OR MCM.DATA.ReadData[(MCM.CONFIG.Port2.CmdErrPtr - MCM.CONFIG.ModDef.ReadStartReg) + CurrentCommand]);
+            END_IF;
         END_IF;
     END_FOR;
 ELSE
