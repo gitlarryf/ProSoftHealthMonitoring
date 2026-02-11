@@ -1,0 +1,53 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: MBTCPErrorChecker
+//  Author : Larry Frieson
+//  Desc   : Routine to check for Modbus Errors on any of the 20 clients on the MVI69E-MBTCP Modbus module.  This code can
+//           can also execute a message to zero out READ data on error.
+//  Date   : 05/16/2024 (Enhaned from 11/18/2019 version)
+//  Tags   : MBTCPErrorData: (Controller Scope): MBTCPClients - Contains all of the data for the error checking.  User MUST
+//                                                              populate all of the data in this tag for this routine to
+//                                                              function correctly!
+//  UDT    : MBTCPClients
+//           EnableMBTCPErrorChecking:  BOOL    - Used to enable/disable this routine
+//           ClientNumber:              INT     - TEMP: Current Clinet # being checked
+//           CurrentClient:             INT     - TEMP: Current Client being checked
+//           ReadDataSize:              INT     - Size of the ReadData array for saftey sake
+//           ReadRegisterStart          INT     - Read Register Start from PCB
+//           CurrentCommand:            INT     - Temp Command # being processed
+//           CurrentError               INT     - TEMP: Current Error value being checked.
+//           CheckForErrors:            INT[20] - 1 = Check this client for errors, 0 = do not check for errors
+//           CmdErrorPointer:           INT[20] - Command Error Pointer value from PCB, where in ReadData are the errors?
+//           CommandCount:              INT[20] - Command Count for each client, if 0, no commands will be checked.
+//           ClientError:               BOOL[20]- State of the client.  1 == We had an error.  0 == no error.
+//
+//  Copyright © 2019-2024  ProSoft Technology, Inc.  All rights reserved.
+//
+//  Revision History: 
+//    11/18/2019 16:39:09 created.
+//    05/16/2024 11:43:52 Converted to UDT 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+IF NOT MBTCPErrorData.EnableMBTCPErrorChecking THEN
+    RET();
+END_IF;
+
+IF MBTCPErrorData.ReadDataSize <= 0 THEN
+	SIZE(MBTCP.DATA.ReadData, 0, MBTCPErrorData.ReadDataSize);
+END_IF;
+
+// MBTCP Error checker code
+FOR MBTCPErrorData.ClientNumber := 0 TO MBTCPErrorData.ClientCount DO
+	IF MBTCPErrorData.CheckForErrors[MBTCPErrorData.ClientNumber] THEN
+		
+		MBTCPErrorData.CurrentError := 0;
+		MBTCPErrorData.ClientError[MBTCPErrorData.ClientNumber] := 0;
+		FOR MBTCPErrorData.CurrentCommand := (MBTCPErrorData.CmdErrorPointer[MBTCPErrorData.ClientNumber] - MBTCPErrorData.ReadRegisterStart) TO ((MBTCPErrorData.CommandErrorPointer[MBTCPErrorData.ClientNumber] - MBTCPErrorData.ReadRegisterStart) + MBTCPErrorData.CommandCount[MBTCPErrorData.ClientNumber]) - 1 DO
+			
+			IF ((MBTCPErrorData.CommandErrorPointer[MBTCPErrorData.ClientNumber] - MBTCPErrorData.ReadRegisterStart) + MBTCPErrorData.CommandCount[MBTCPErrorData.ClientNumber]) < MBTCPErrorData.ReadDataSize THEN
+    			MBTCPErrorData.ClientError[MBTCPErrorData.ClientNumber] := (MBTCPErrorData.ClientError[MBTCPErrorData.ClientNumber] OR MBTCP.DATA.ReadData[MBTCPErrorData.CurrentCommand]);
+			END_IF;
+		END_FOR;
+        IF MBTCPErrorData.ClientError[MBTCPErrorData.ClientNumber] <> 0 THEN
+            MBTCPErrorData.ClientError[MBTCPErrorData.ClientNumber] := 1;
+        END_IF;
+	END_IF;
+END_FOR;
