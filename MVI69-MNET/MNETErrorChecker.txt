@@ -1,0 +1,54 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: MNETErrorChecker
+//  Author : Larry Frieson
+//  Desc   : Small Routine that checks the error status of an MVI??-MNET and sets the ModbusErrors tag accordingly.
+//  Date   : 11/04/2025
+//  Tags   : MonitorMNET      - Bool: A flag indicating if we should even be performing error checking or not.  (Controller Scope)
+//           MNETError        - INT: Contains the logical OR value of all command errors. (Controller Scope)
+//           CurrCommand      - INT: The index of the command being checked. (Local Program Scope)
+//           CmdErrPtr        - INT: Single value of the Command Error Pointer - Read Register Start from PCB.
+//           NumCommands      - INT: Number of MNET Client 0 commands configured in PCB.
+//           ClientErrors     - INT: Temp tag that holds the collective state of errors on the client.
+//           FlexIO           - (UDT: FlexOutput): UDT of booleans to control a FlexIO 1794-OB8 module.
+//
+//  Copyright © 2025 ProSoft Technology, Inc.  All rights reserved.
+//
+//  Revision History: 
+//    11/04/2025 16:55:25 created.
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Reset our error flag
+MNETError := 0;
+FlexIO.ModbusErrorIndicator := 0;
+
+// Exit routine if we don't want to monitor the errors.
+IF NOT MonitorMNET THEN
+    RET(0);
+END_IF;
+
+ClientErrors := 0;
+// Go through the ReadData array checking for errors, starting at the CmdErrPtr index, for NumCommands indices.
+FOR CurrentCommand := CmdErrPtr TO (CmdErrPtr + NumCommands) - 1 DO
+    // Prevent a fault in the controller if the CommandIndex + CommandErrLen is greater than ReadData array.
+    IF CurrentCommand > (MNET.UTIL.ReadDataSizeGet - 1) THEN
+        // Bail out of this entire check, we're checked as many commands as we can.
+        // Remove this check to allow it to go ahead and fault the controller, if you want that level of checking.
+        EXIT;
+    END_IF;
+    // Perform a logical OR on all of the command errors.  If there are none, we'll end up with 0 at the end.  If there
+    // are any errors whatsoever, we'll end up with SOME sort of value other than zero.
+    ClientErrors := (ClientErrors OR MNET.DATA.ReadData[CurrentCommand]);
+END_FOR;
+
+// Do what you need to do to process your errors.
+// Set Stack light indicating which client is in error.
+// We start by assuming that none of the clients are in error--so we set the GREEN light to ON.
+FlexIO.ModbusGoodIndicator := 1;
+IF ClientErrors = 0 THEN
+    // Set the proper LED Error indicators for our 1794-OB8.  NO errors reported, so toggle the
+    // LED to Green, and turn off the red LED.
+    FlexIO.ModbusErrorIndicator := 0;
+ELSE
+    // Set the proper LED Error indicators for our 1794-OB8.  In this case, we have errors to report.
+    FlexIO.ModbusErrorIndicator := 1;
+    FlexIO.ModbusGoodIndicator := 0;
+END_IF;
