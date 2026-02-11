@@ -1,0 +1,48 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  Routine: MNETErrorChecker
+//  Author : Larry Frieson
+//  Desc   : Small Routine that checks the error status of an MNET, MNETR, MNETC, or MNETCR module, and sets the ModbusErrors 
+//           tag accordingly.
+//  Date   : 08/28/2018
+//  Tags   : MonitorMNET - Bool: A flag indicating if we should even be performing error checking or not.  (Controller Scope)
+//           MNETError   - INT: Contains the logical OR value of all command errors. (Controller Scope)
+//           CurrCommand - INT: The index of the command being checked. (Local Scope)
+//           CommandIndex- INT: The starting index for the CommandErrPtr. (Local Or Controller Scope)
+//           CommandErrLen-INT: The length of the CommandErrPtr.  (How many index's do we read. (Local or Controller Scope)
+//           FlexIO - (UDT: FlexOutput): UDT of booleans to control a FlexIO 1794-OB8 module.
+//
+//  Copyright © 2018 ProSoft Technology, Inc.  All rights reserved.
+//
+//  Revision History: 
+//    08/28/2018 17:05:09 created.
+//    07/09/2020 11:15:16 Added Global Monitor flag MonitorMNET
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Reset our error flag
+MNETError := 0;
+FlexIO.ModbusErrorIndicator := 0;
+
+// Exit routine if we don't want to monitor the errors.
+IF NOT MonitorMNET THEN
+    RET(0);
+END_IF;
+
+// Go through the ReadData array checking for errors, starting at the CommandIndex index, for CommandErrorLen indices.
+// Note: Here we cannot protect ourselves from walking off the end of the ReadData, because we don't know how big it is.
+//       This can still be accomplished by using the SIZE() opcode and reading it right from the processor, but then you'd
+//       also need a tag to hold that size.
+FOR CurrentCommand := CommandIndex TO (CommandIndex + CommandErrLen) - 1 DO
+    // Perform a logical OR on all of the command errors.  If there are none, we'll end up with 0 at the end.  If there
+    // are any errors whatsoever, we'll end up with SOME sort of value other than zero.
+    MNETError := (MNETError OR MNETC.DATA.ReadData[CurrentCommand]);
+END_FOR;
+
+
+// Set Stack light indicating error condition
+IF MNETError = 0 THEN
+    // Set the proper LED Error indicators for our 1794-OB8.  NO errors reported, so toggle the
+    // LED to Green, and turn off the red LED.
+    FlexIO.ModbusErrorIndicator := 0;
+ELSE
+    // Set the proper LED Error indicators for our 1794-OB8.  In this case, we have errors to report.
+    FlexIO.ModbusErrorIndicator := 1;
+END_IF;
