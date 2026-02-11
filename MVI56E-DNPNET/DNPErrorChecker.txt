@@ -16,6 +16,8 @@
 //                                           there are no command errors.  If it is anything other than 0; you have one or more
 //                                           command errors.
 //           CurrentCommand - INT, Program Scope: The index of the command being checked.
+//           CheckedCommands- INT, Program Scope: The total # of commands we /actually/ checked.  This ensures that if we're in
+//                                                error or not, we know we checked something, at least.
 //           DNPStatusCount - DINT, Program Scope: The number of times we've seen the "300 status block".
 //           DNPErrorReadThreshold - DINT, Program Scope: This is a CONSTANT value that decides how often we're going to ask
 //                                                        for the command error statuses.  This value should be between
@@ -24,7 +26,7 @@
 //                                                        cannot be provided to give you exact results.  You would need to trend
 //                                                        DNPStatusCount to see how often it is being reset to 0, to get a WCT.
 //                                                        Prime values would probably work best here, if you're using other DNPNET
-//                                                        special blocks.  Contact Tech Support for more information.
+//                                                        special blocks.  Contact me for more detailed information.
 //           FlexIO - UDT:FlexOutput, Controller Scope: UDT of Booleans to control a FlexIO 1794-OB8 module. (Example only!)
 //
 //  Copyright © 2016 ProSoft Technology, Inc.  All rights reserved.
@@ -62,7 +64,11 @@ IF DNPNET.UTIL.LastRead = 300 AND DNPStatusCount >= DNPErrorReadThreshold THEN
     /*** NOTE: If you're extra paranoid, you can actually clear the DNPNET.STATUS.CommandErrors array here; or set them all
      ***       some known value so that you can be 1000000% certain that the DNPNET processed the 9950 block, before you go
      ***       iterating it, checking for errors.  I've left that to be an exercise for the reader/SI who would be implementing
-     ***       this routine.  I'd also like to stipulate that it is /not/ necessary, but I understand the reasoning behind it. */
+     ***       this routine.  I'd also like to stipulate that it is /not/ necessary, but I understand the reasoning behind it.
+    FOR CurrentCommand := 0 TO NumCommands DO
+        DNPNET.STATUS.CommandErrors[CurrentCommand] := 9999;
+    END_FOR;
+    */
     DNPNET.CONTROL.Command_Errors.Number_Of_Commands := NumCommands;
     DNPNET.CONTROL.Command_Errors.Request := 1;
     DNPStatusCount := 0;
